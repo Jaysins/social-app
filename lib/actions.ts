@@ -44,7 +44,6 @@ export async function loginUser(data: {email: string, password: string} ) {
 
 export async function getProfile(token: string) {
   // Simulate API delay or log credentials as needed
-  console.log("fetcjomg iser profile in user:");
   const result = await apiFetch('auth/profile', {
     method: 'GET',
   }, token);
@@ -53,14 +52,10 @@ export async function getProfile(token: string) {
     return { success: false, error: result.error };
   }
 
-  console.log("User logged in:", result.data);
   return { success: true, data: result.data };
 }
 
-// Profile management
-export async function updateProfile(data: {username?: string, bio?: string, location?: string, token?: string}) {
-  // Simulate API delay
-  console.log(data)
+export async function updateProfile(data: {username?: string, bio?: string, location?: string, token: string}) {
   const { token, ...profileData } = data;
   console.log("Updating profile:", profileData)
   const result = await apiFetch('auth/profile/update', {
@@ -75,52 +70,107 @@ export async function updateProfile(data: {username?: string, bio?: string, loca
   return { success: true, data: result.data };
 }
 
-// actions.ts
 export async function getConversations(token: string) {
-  // Call the chats/all endpoint using your apiFetch helper.
   const result = await apiFetch('chats/all', { method: 'GET' }, token);
 
   if (result.error) {
     return { success: false, error: result.error };
   }
 
-  // Return the conversations as provided by the backend.
-  // The result.data is expected to be an array of conversation objects.
   return { success: true, data: result.data };
 }
 
 
-// Friend/contact management
-export async function addFriend(userId: number) {
-  // Simulate API delay
-  await new Promise((resolve) => setTimeout(resolve, 500))
-  console.log("Adding friend with ID:", userId)
-  return { success: true }
+export async function getUsers(data: {token: string, query?: string}) {
+  const { token, query } = data;
+
+  const path = query ? `users/all?q=${query}` : "users/all"
+
+  const result = await apiFetch(path, { method: 'GET' }, token);
+
+  if (result.error) {
+    return { success: false, error: result.error };
+  }
+
+  return { success: true, data: result.data };
 }
 
-export async function acceptFriendRequest(requestId: number) {
-  // Simulate API delay
-  await new Promise((resolve) => setTimeout(resolve, 500))
-  console.log("Accepting friend request:", requestId)
-  return { success: true }
+export async function getContacts(data: {token: string, query?: string}) {
+  const { token, query } = data;
+
+  const path = query ? `friends/all?q=${query}` : "friends/all"
+
+  const result = await apiFetch(path, { method: 'GET' }, token);
+
+  if (result.error) {
+    return { success: false, error: result.error };
+  }
+
+  return { success: true, data: result.data };
 }
 
-export async function rejectFriendRequest(requestId: number) {
-  // Simulate API delay
-  await new Promise((resolve) => setTimeout(resolve, 500))
-  console.log("Rejecting friend request:", requestId)
-  return { success: true }
+
+export async function getFriendRequests(data: {token: string, query?: string}) {
+  const { token, query } = data;
+
+  const path = query ? `friends/requests?q=${query}` : "friends/requests"
+
+  const result = await apiFetch(path, { method: 'GET' }, token);
+
+  if (result.error) {
+    return { success: false, error: result.error };
+  }
+
+  return { success: true, data: result.data };
 }
 
-// Messaging
-export async function sendMessage(messageData: { conversationId: string | number; content: string }) {
-  // Simulate API delay
-  await new Promise((resolve) => setTimeout(resolve, 500))
-  console.log("Sending message:", messageData)
-  return { success: true, messageId: 10 }
+export async function addFriend(data: {target: string, token: string}) {
+  const { token, ...requestData } = data;
+  console.log("sending friend request:", requestData)
+  const result = await apiFetch('friends/requests', {
+    method: 'POST',
+    body: JSON.stringify(requestData),
+  }, token);
+  if (result.error) {
+    return { success: false, error: result.error };
+  }
+  console.log("friend request sent:", result.data);
+  return { success: true, data: result.data };
 }
 
-export async function createGroupChat(groupData: { name: string; members: number[] }) {
+
+export async function respondToFriendRequest(data: {id: string, accept: boolean, token: string}) {
+  const { token, id, ...requestData } = data;
+  console.log("responding to friend request:", requestData)
+  const result = await apiFetch(`friends/requests/${id}/respond`, {
+    method: 'POST',
+    body: JSON.stringify(requestData),
+  }, token);
+  if (result.error) {
+    return { success: false, error: result.error };
+  }
+  console.log("friend request responded:", result.data);
+  return { success: true, data: result.data };
+}
+
+
+export async function createChat(data: { participantUserId: string; token: string}) {
+  const { token, ...requestData } = data;
+  console.log("responding to friend request:", requestData)
+  const result = await apiFetch("chats/create", {
+    method: 'POST',
+    body: JSON.stringify(requestData),
+  }, token);
+  if (result.error) {
+    return { success: false, error: result.error };
+  }
+  console.log("friend request responded:", result.data);
+  return { success: true, data: result.data };
+}
+
+
+
+export async function createGroupChat(groupData: { name: string; members: string[] }) {
   // Simulate API delay
   await new Promise((resolve) => setTimeout(resolve, 500))
   console.log("Creating group chat:", groupData)

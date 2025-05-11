@@ -28,7 +28,7 @@ export type ReadReceiptData = {
 }
 
 export type UserStatusData = {
-  userId: number
+  userId: string
   status: "online" | "offline"
 }
 

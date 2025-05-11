@@ -1,6 +1,6 @@
 "use client"
 import type React from "react"
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 
 import { v4 as uuidv4 } from 'uuid'; // if you install uuid library
 
@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Card } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { PlusCircle, Send } from "lucide-react"
-import { sendMessage, createGroupChat, getConversations } from "@/lib/actions"
+import { createChat, getContacts, getConversations } from "@/lib/actions"
 import {
   Dialog,
   DialogContent,
@@ -26,32 +26,9 @@ import { TypingIndicator } from "@/components/typing-indicator"
 import type { MessageData, TypingData, UserStatusData } from "@/lib/socket"
 import { useApi } from "@/hooks/use-api"
 import { getLoggedInToken } from "@/lib/client-utils"
+import { Conversation, Friend, UIMessage } from "@/lib/types";
 
 // Define the conversation shape expected by the UI.
-interface Conversation {
-  id: string | number
-  name: string
-  avatar: string
-  lastMessage: string
-  unread: boolean
-  type: "direct" | "group"
-  userId?: number | string
-  status?: "online" | "offline"
-  members?: string[]
-  messages?: any[] // raw messages array from API (lastMessages)
-}
-
-// Define the UI message shape.
-interface UIMessage {
-  id: string | number
-  tempId?: string
-  temp?: boolean
-  sender: string
-  content: string
-  time: string
-  isMine: boolean
-  read: boolean
-}
 
 export default function MessagesPage() {
   // Retrieve current user data.
@@ -59,10 +36,10 @@ export default function MessagesPage() {
   if (!stringedUser){
     return null
   }
-  const user = JSON.parse(stringedUser)
+  const currentUser = JSON.parse(stringedUser)
 
-  const currentUserId = user._id
-  const currentUsername = user.username
+  const currentUserId = currentUser._id
+  const currentUsername = currentUser.username
 
   // API hook for fetching conversations.
   const getConversationsApi = useApi(getConversations)
@@ -82,9 +59,12 @@ export default function MessagesPage() {
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
   const [chatType, setChatType] = useState<"direct" | "group">("direct")
-  const [selectedUsers, setSelectedUsers] = useState<number[]>([])
-  const [groupName, setGroupName] = useState("")
+  const [selectedUsers, setSelectedUsers] = useState<string[]>([])
+  const [contacts, setContacts] = useState<Friend[]>([])
 
+  const getContactsApi = useApi(getContacts)
+  const createChatApi = useApi(createChat)
+  
   // Get socket from context.
   const { socket, isConnected } = useSocket()
 
@@ -93,9 +73,18 @@ export default function MessagesPage() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }
 
-  // Fetch conversations from /chats/all when token is available.
-  useEffect(() => {
-    async function fetchConversations() {
+    // Data fetching
+    const fetchContacts = useCallback(async () => {
+      if (!token) return
+      const response = await getContactsApi.execute(token, {})
+      if (response?.success) setContacts(response.data.data)
+    }, [token])
+
+    useEffect(() => {
+      fetchContacts()
+    }, [fetchContacts, token])
+
+    const fetchConversations = useCallback(async () => {
       if (!token) return
       const response = await getConversationsApi.execute(token)
       if (response && response.success && Array.isArray(response.data.data)) {
@@ -106,9 +95,7 @@ export default function MessagesPage() {
             // For individual chats, use the participant whose user id is not the current user's.
             const otherParticipant = chat.participants.find((p: any) => p.user !== currentUserId)
             name = otherParticipant ? otherParticipant.username : "Unknown User"
-          } else if (chat.type === "group") {
-            name = chat.groupName || "Group Chat"
-          }
+          } 
           // Map the first message (if available) for conversation list display.
           console.log(chat.lastMessages, 'alarst', chat.lastMessages[-1])
           const lastMsg =
@@ -119,15 +106,10 @@ export default function MessagesPage() {
               : "No messages yet"
           return {
             id: chat._id,
-            name,
-            avatar: "/placeholder.svg?height=40&width=40",
             lastMessage: lastMsg,
-            unread: false,
-            type: chat.type === "individual" ? "direct" : "group",
-            // Optionally set userId and status.
-            userId: chat.participants[0].user,
-            status: "offline",
-            members: chat.participants.map((p: any) => p.username),
+            type: "direct",
+            participants: chat.participants,
+            target: chat.participants.find((p: any) => p.user !== currentUserId),
             messages: chat.lastMessages || [], // Store raw lastMessages
           } as Conversation
         })
@@ -136,7 +118,10 @@ export default function MessagesPage() {
           setSelectedConversation(convos[0])
         }
       }
-    }
+    }, [token])
+
+  // Fetch conversations from /chats/all when token is available.
+  useEffect(() => {
     fetchConversations()
   }, [token])
 
@@ -211,7 +196,7 @@ export default function MessagesPage() {
         const finalMsg: UIMessage = {
           id: data.tempId, // You may update this with a final server id if available.
           tempId: data.tempId,
-          sender: isMine ? "You" : data.message.sender.username,
+          sender: data.message.sender,
           content: data.message.content,
           time: new Date(data.message.timestamp).toLocaleTimeString([], {
             hour: "2-digit",
@@ -360,7 +345,7 @@ export default function MessagesPage() {
       // Add to messages UI optimistically.
       const optimisticMessage: UIMessage = {
         id: tempId,
-        sender: "You",
+        sender: {user: currentUserId, username: currentUsername},
         content: messageData.content,
         time: new Date(messageData.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         isMine: true,
@@ -392,42 +377,51 @@ export default function MessagesPage() {
   async function handleCreateChat() {
     try {
       if (chatType === "direct" && selectedUsers.length === 1) {
-        const newConversation: Conversation = {
-          id: Date.now(),
-          name: "New Contact",
-          avatar: "/placeholder.svg?height=40&width=40",
-          lastMessage: "Start a conversation",
-          unread: false,
-          type: "direct",
-          userId: selectedUsers[0],
-          status: "offline",
-        };
-        setConversations([newConversation, ...conversations]);
-        setSelectedConversation(newConversation);
-      } else if (chatType === "group" && selectedUsers.length > 0 && groupName) {
-        await createGroupChat({
-          name: groupName,
-          members: selectedUsers,
-        });
-        const newGroup: Conversation = {
-          id: Date.now(),
-          name: groupName,
-          avatar: "/placeholder.svg?height=40&width=40",
-          lastMessage: "Group created",
-          unread: false,
-          type: "group",
-          members: ["You", "User 1", "User 2", "User 3"].slice(0, selectedUsers.length + 1),
-        };
-        setConversations([newGroup, ...conversations]);
-        setSelectedConversation(newGroup);
-      }
-      setSelectedUsers([]);
-      setGroupName("");
+        const response = await createChatApi.execute(token, {participantUserId: selectedUsers[0]})
+        console.log(response?.data, 'creating chatt')
+        if (response?.success) {
+          const newConversation = response.data.data;
+          const exists = conversations.some(
+            (c) => c.id === newConversation._id
+          );
+
+          if (exists) {
+            const existingConversation = conversations.find(
+              (c) => c.id === newConversation._id
+            );
+            if (existingConversation) {
+              setSelectedConversation(existingConversation);
+            }
+          } else {
+            const formattedConversation = {
+              id: newConversation._id,
+              lastMessage: "",
+              type: "direct",
+              participants: newConversation.participants,
+              target: newConversation.participants.find((p: any) => p.user !== currentUserId),
+              messages: newConversation.lastMessages || [],
+            } as Conversation;
+
+    setConversations([formattedConversation, ...conversations]);
+    setSelectedConversation(formattedConversation);
+  }
+}
+      } 
+      setSelectedUsers([]); 
       setIsDialogOpen(false);
     } catch (error) {
       console.error(error);
     }
   }
+
+  const getRelationship = useCallback((friend: Friend) => {
+    if (!currentUserId) return { otherParty: friend.target, isCurrentUserRequester: false }
+    
+    return {
+      otherParty: friend.user.id === currentUserId ? friend.target : friend.user,
+      isCurrentUserRequester: friend.user.id === currentUserId
+    }
+  }, [currentUserId])
 
   return (
     <div className="space-y-6">
@@ -461,57 +455,37 @@ export default function MessagesPage() {
                     >
                       Direct Message
                     </Button>
-                    <Button
-                      variant={chatType === "group" ? "default" : "outline"}
-                      onClick={() => setChatType("group")}
-                      className="flex-1"
-                    >
-                      Group Chat
-                    </Button>
+
                   </div>
 
-                  {chatType === "group" && (
-                    <div className="space-y-2">
-                      <Label htmlFor="group-name">Group Name</Label>
-                      <Input
-                        id="group-name"
-                        value={groupName}
-                        onChange={(e) => setGroupName(e.target.value)}
-                        placeholder="Enter group name"
-                      />
-                    </div>
-                  )}
 
                   <div className="space-y-2">
-                    <Label>{chatType === "direct" ? "Select User" : "Select Users"}</Label>
+                    <Label>Select User</Label>
                     <div className="border rounded-md p-3 space-y-2">
-                      {[
-                        { id: 101, name: "Jane Smith" },
-                        { id: 102, name: "Mike Johnson" },
-                        { id: 103, name: "Sarah Williams" },
-                        { id: 104, name: "David Brown" },
-                      ].map((user) => (
-                        <div key={user.id} className="flex items-center space-x-2">
+                      {contacts.map((contact) => {
+                        const {  otherParty } = getRelationship(contact)
+                        return(
+                        <div key={otherParty.id} className="flex items-center space-x-2">
                           <Checkbox
-                            id={`user-${user.id}`}
-                            checked={selectedUsers.includes(user.id)}
+                            id={`user-${otherParty.id}`}
+                            checked={selectedUsers.includes(otherParty.id)}
                             onCheckedChange={(checked) => {
                               if (checked) {
                                 if (chatType === "direct") {
-                                  setSelectedUsers([user.id])
+                                  setSelectedUsers([otherParty.id])
                                 } else {
-                                  setSelectedUsers([...selectedUsers, user.id])
+                                  setSelectedUsers([...selectedUsers, otherParty.id])
                                 }
                               } else {
-                                setSelectedUsers(selectedUsers.filter((id) => id !== user.id))
+                                setSelectedUsers(selectedUsers.filter((id) => id !== otherParty.id))
                               }
                             }}
                           />
-                          <Label htmlFor={`user-${user.id}`} className="cursor-pointer">
-                            {user.name}
+                          <Label htmlFor={`user-${otherParty.id}`} className="cursor-pointer">
+                            {otherParty.username}
                           </Label>
                         </div>
-                      ))}
+                      )})}
                     </div>
                   </div>
                 </div>
@@ -520,9 +494,8 @@ export default function MessagesPage() {
                   <Button
                     onClick={handleCreateChat}
                     disabled={
-                      (chatType === "direct" && selectedUsers.length !== 1) ||
-                      (chatType === "group" && (selectedUsers.length === 0 || !groupName))
-                    }
+                      (chatType === "direct" && selectedUsers.length !== 1)
+                                        }
                   >
                     Create
                   </Button>
@@ -544,17 +517,17 @@ export default function MessagesPage() {
                 >
                   <div className="relative">
                     <Avatar>
-                      <AvatarImage src={conversation.avatar} alt={conversation.name} />
-                      <AvatarFallback>{conversation.name.charAt(0)}</AvatarFallback>
+                      {/* <AvatarImage src={conversation.avatar} alt={conversation.name} /> */}
+                      <AvatarFallback>{conversation.target.username.charAt(0)}</AvatarFallback>
                     </Avatar>
-                    {conversation.type === "direct" && conversation.status === "online" && (
+                    {conversation.type === "direct" && conversation.target.status === "online" && (
                       <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full bg-green-500 border-2 border-background"></span>
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex justify-between items-center">
-                      <p className="font-medium truncate">{conversation.name}</p>
-                      {conversation.unread && <span className="h-2 w-2 rounded-full bg-primary"></span>}
+                      <p className="font-medium truncate">{conversation.target.username}</p>
+                      {/* {conversation.unread && <span className="h-2 w-2 rounded-full bg-primary"></span>} */}
                     </div>
                     <p className="text-xs text-muted-foreground truncate">{conversation.lastMessage}</p>
                   </div>
@@ -569,19 +542,16 @@ export default function MessagesPage() {
             <div className="flex items-center gap-3">
               <div className="relative">
                 <Avatar>
-                  <AvatarImage src={selectedConversation?.avatar} alt={selectedConversation?.name} />
-                  <AvatarFallback>{selectedConversation?.name.charAt(0)}</AvatarFallback>
+                  {/* <AvatarImage src={selectedConversation?.target.profilePicture} alt={selectedConversation?.target.username} /> */}
+                  <AvatarFallback>{selectedConversation?.target.username.charAt(0)}</AvatarFallback>
                 </Avatar>
-                {selectedConversation?.type === "direct" && selectedConversation?.status === "online" && (
+                {selectedConversation?.type === "direct" && selectedConversation?.target.status === "online" && (
                   <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full bg-green-500 border-2 border-background"></span>
                 )}
               </div>
               <div>
-                <h3 className="font-medium">{selectedConversation?.name}</h3>
-                {selectedConversation?.type === "group" && (
-                  <p className="text-xs text-muted-foreground">{selectedConversation?.members?.join(", ")}</p>
-                )}
-                {selectedConversation?.type === "direct" && selectedConversation?.status === "online" && (
+                <h3 className="font-medium">{selectedConversation?.target.username}</h3>
+                {selectedConversation?.type === "direct" && selectedConversation?.target.status === "online" && (
                   <p className="text-xs text-green-500">Online</p>
                 )}
               </div>
@@ -592,7 +562,7 @@ export default function MessagesPage() {
             {messages.map((message) => (
               <div key={message.id} className={`flex ${message.isMine ? "justify-end" : "justify-start"}`}>
                 <div className={`max-w-[70%] ${message.isMine ? "bg-primary text-primary-foreground" : "bg-muted"} rounded-lg p-3`}>
-                  {!message.isMine && <p className="text-xs font-medium mb-1">{message.sender}</p>}
+                  {!message.isMine && <p className="text-xs font-medium mb-1">{message.sender.username}</p>}
                   <p>{message.content}</p>
                   <div className="flex items-center justify-end gap-1 mt-1">
                     <p className="text-xs opacity-70">{message.time}</p>

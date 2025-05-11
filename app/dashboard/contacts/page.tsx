@@ -1,98 +1,127 @@
 "use client"
 
-import type React from "react"
-
-import { useState } from "react"
+import { useCallback, useEffect, useState } from "react"
+import { Clock, Search, UserPlus, Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { Search, UserPlus, Check, X } from "lucide-react"
-import { addFriend, acceptFriendRequest, rejectFriendRequest } from "@/lib/actions"
+import { addFriend, respondToFriendRequest, getContacts, getUsers, getFriendRequests } from "@/lib/actions"
+import { getLoggedInToken } from "@/lib/client-utils"
+import { useApi } from "@/hooks/use-api"
+import { Friend, People } from "@/lib/types"
+
 
 export default function ContactsPage() {
-  // This would normally be fetched from a database
-  const [contacts, setContacts] = useState([
-    { id: 1, name: "Jane Smith", avatar: "/placeholder.svg?height=40&width=40", status: "online" },
-    { id: 2, name: "Mike Johnson", avatar: "/placeholder.svg?height=40&width=40", status: "offline" },
-    { id: 3, name: "Sarah Williams", avatar: "/placeholder.svg?height=40&width=40", status: "online" },
-    { id: 4, name: "David Brown", avatar: "/placeholder.svg?height=40&width=40", status: "offline" },
-  ])
-
-  const [pendingRequests, setPendingRequests] = useState([
-    { id: 101, name: "Alex Turner", avatar: "/placeholder.svg?height=40&width=40" },
-    { id: 102, name: "Emma Wilson", avatar: "/placeholder.svg?height=40&width=40" },
-    { id: 103, name: "Robert Davis", avatar: "/placeholder.svg?height=40&width=40" },
-  ])
-
-  const [searchResults, setSearchResults] = useState([
-    { id: 201, name: "Chris Martin", avatar: "/placeholder.svg?height=40&width=40" },
-    { id: 202, name: "Lisa Anderson", avatar: "/placeholder.svg?height=40&width=40" },
-  ])
+  const token = getLoggedInToken()
+  const userString = localStorage.getItem('user')
 
   const [searchQuery, setSearchQuery] = useState("")
   const [isSearching, setIsSearching] = useState(false)
+  const [contacts, setContacts] = useState<Friend[]>([])
+  const [pendingRequests, setPendingRequests] = useState<Friend[]>([])
+  const [searchResults, setSearchResults] = useState<People[]>([])
 
-  async function handleSearch(e: React.FormEvent<HTMLFormElement>) {
+  // API hooks
+  const getContactsApi = useApi(getContacts)
+  const addFriendApi = useApi(addFriend)
+  const getFriendRequestsApi = useApi(getFriendRequests)
+  const respondToFriendRequestApi = useApi(respondToFriendRequest)
+  const getUsersApi = useApi(getUsers)
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!userString) return
+
+      try {
+        const user = JSON.parse(userString)
+        setCurrentUserId(user.id)
+      } catch (error) {
+        console.error("Error decoding token:", error)
+      }
+  }, [userString])
+
+
+  // Data fetching
+  const fetchContacts = useCallback(async () => {
+    if (!token) return
+    const response = await getContactsApi.execute(token, {})
+    if (response?.success) setContacts(response.data.data)
+  }, [token])
+
+  const fetchFriendRequests = useCallback(async () => {
+    if (!token) return
+    const response = await getFriendRequestsApi.execute(token, {})
+    if (response?.success) setPendingRequests(response.data.data)
+  }, [token])
+
+  useEffect(() => {
+    fetchContacts()
+    fetchFriendRequests()
+  }, [fetchContacts, fetchFriendRequests, token])
+
+  // Search handlers
+  const handleSearch = useCallback(async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault()
-    setIsSearching(true)
+    if (!searchQuery.trim()) return
 
+    setIsSearching(true)
     try {
-      // In a real app, this would search the database
-      // For now, we'll just use our mock data
-      console.log(`Searching for: ${searchQuery}`)
-      // Simulate API call delay
-      await new Promise((resolve) => setTimeout(resolve, 500))
+      const response = await getUsersApi.execute(token, { query: searchQuery })
+      if (response?.success) setSearchResults(response.data.data)
     } catch (error) {
-      console.error(error)
+      console.error("Search failed:", error)
     } finally {
       setIsSearching(false)
     }
-  }
+  }, [searchQuery, token])
 
-  async function handleAddFriend(userId: number) {
+  // Friend request handlers
+  const handleAddFriend = useCallback(async (userId: string) => {
     try {
-      await addFriend(userId)
-      // In a real app, this would update the database
-      // For now, we'll just remove from search results
-      setSearchResults(searchResults.filter((user) => user.id !== userId))
-    } catch (error) {
-      console.error(error)
-    }
-  }
-
-  async function handleAcceptRequest(userId: number) {
-    try {
-      await acceptFriendRequest(userId)
-      // In a real app, this would update the database
-      // For now, we'll just update our state
-      const acceptedUser = pendingRequests.find((user) => user.id === userId)
-      if (acceptedUser) {
-        setContacts([...contacts, { ...acceptedUser, status: "offline" }])
-        setPendingRequests(pendingRequests.filter((user) => user.id !== userId))
+      const response = await addFriendApi.execute(token, { target: userId })
+      if (response?.success) {
+        setSearchResults(prev => prev.map(user => 
+          user.id === userId ? { ...user, friendStatus: "pending-sent" } : user
+        ))
       }
     } catch (error) {
-      console.error(error)
+      console.error("Add friend failed:", error)
     }
-  }
+  }, [token])
 
-  async function handleRejectRequest(userId: number) {
+  const handleRespondToRequest = useCallback(async (requestId: string, accept: boolean) => {
     try {
-      await rejectFriendRequest(userId)
-      // In a real app, this would update the database
-      setPendingRequests(pendingRequests.filter((user) => user.id !== userId))
+      const response = await respondToFriendRequestApi.execute(token, { id: requestId, accept })
+      if (response?.success) {
+        setPendingRequests(prev => prev.filter(request => request.id !== requestId))
+        setSearchResults(prev => prev.map(user => 
+          user.id === response.data.userId ? { ...user, friendStatus: accept ? "accepted" : "none" } : user
+        ))
+        fetchContacts()
+      }
     } catch (error) {
-      console.error(error)
+      console.error("Request response failed:", error)
     }
-  }
+  }, [fetchContacts, token])
+
+
+  const getRelationship = useCallback((friend: Friend) => {
+    if (!currentUserId) return { otherParty: friend.target, isCurrentUserRequester: false }
+    
+    return {
+      otherParty: friend.user.id === currentUserId ? friend.target : friend.user,
+      isCurrentUserRequester: friend.user.id === currentUserId
+    }
+  }, [currentUserId])
 
   return (
     <div className="space-y-6">
-      <div>
+      <header>
         <h1 className="text-3xl font-bold tracking-tight">Contacts</h1>
         <p className="text-muted-foreground">Manage your friends and connections</p>
-      </div>
+      </header>
 
       <Tabs defaultValue="friends">
         <TabsList className="grid w-full grid-cols-3">
@@ -101,90 +130,99 @@ export default function ContactsPage() {
           <TabsTrigger value="find">Find People</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="friends" className="mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Your Friends</CardTitle>
-              <CardDescription>You have {contacts.length} friends</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                {contacts.map((contact) => (
-                  <div key={contact.id} className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <Avatar>
-                        <AvatarImage src={contact.avatar} alt={contact.name} />
-                        <AvatarFallback>{contact.name.charAt(0)}</AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <p className="font-medium">{contact.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {contact.status === "online" ? (
-                            <span className="flex items-center gap-1">
-                              <span className="h-2 w-2 rounded-full bg-green-500"></span> Online
-                            </span>
-                          ) : (
-                            <span className="flex items-center gap-1">
-                              <span className="h-2 w-2 rounded-full bg-gray-300"></span> Offline
-                            </span>
-                          )}
-                        </p>
-                      </div>
-                    </div>
-                    <Button variant="ghost" size="sm">
-                      Message
+{/* Friends Tab */}
+<TabsContent value="friends" className="mt-6">
+  <Card>
+    <CardHeader>
+      <CardTitle>Your Friends</CardTitle>
+      <CardDescription>You have {contacts.length} friends</CardDescription>
+    </CardHeader>
+    <CardContent className="space-y-4">
+      {contacts.map((contact) => {
+        const { otherParty } = getRelationship(contact)
+        return (
+          <div key={contact.id} className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Avatar>
+                <AvatarImage src={otherParty.profileImage} alt={otherParty.username} />
+                <AvatarFallback>{otherParty.username[0]}</AvatarFallback>
+              </Avatar>
+              <div>
+                <p className="font-medium">{otherParty.username}</p>
+                <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                  <span className={`h-2 w-2 rounded-full ${
+                    otherParty.status === 'online' ? 'bg-green-500' : 'bg-gray-300'
+                  }`} />
+                  {otherParty.status === 'online' ? 'Online' : 'Offline'}
+                </span>
+              </div>
+            </div>
+            <Button variant="ghost" size="sm">Message</Button>
+          </div>
+        )
+      })}
+    </CardContent>
+  </Card>
+</TabsContent>
+
+{/* Requests Tab */}
+<TabsContent value="requests" className="mt-6">
+  <Card>
+    <CardHeader>
+      <CardTitle>Friend Requests</CardTitle>
+      <CardDescription>Pending connection requests</CardDescription>
+    </CardHeader>
+    <CardContent>
+      {pendingRequests.length === 0 ? (
+        <p className="py-4 text-center text-muted-foreground">No pending requests</p>
+      ) : (
+        <div className="space-y-4">
+          {pendingRequests.map((request) => {
+            const { otherParty, isCurrentUserRequester } = getRelationship(request)
+            return (
+              <div key={request.id} className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Avatar>
+                    <AvatarImage src={otherParty.profileImage} alt={otherParty.username} />
+                    <AvatarFallback>{otherParty.username[0]}</AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="font-medium">{otherParty.username}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {isCurrentUserRequester ? "Your request" : "Wants to connect"}
+                    </p>
+                  </div>
+                </div>
+                {!isCurrentUserRequester ? (
+                  <div className="flex gap-2">
+                    <Button size="sm" variant="outline" 
+                      onClick={() => handleRespondToRequest(request.id, false)}>
+                      <X className="mr-1 h-4 w-4" /> Decline
+                    </Button>
+                    <Button size="sm" 
+                      onClick={() => handleRespondToRequest(request.id, true)}>
+                      <Check className="mr-1 h-4 w-4" /> Accept
                     </Button>
                   </div>
-                ))}
+                ) : (
+                  <Button size="sm" variant="outline" disabled>
+                    <Clock className="mr-1 h-4 w-4" /> Pending
+                  </Button>
+                )}
               </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="requests" className="mt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Friend Requests</CardTitle>
-              <CardDescription>People who want to connect with you</CardDescription>
-            </CardHeader>
-            <CardContent>
-              {pendingRequests.length === 0 ? (
-                <p className="text-center py-4 text-muted-foreground">No pending friend requests</p>
-              ) : (
-                <div className="space-y-4">
-                  {pendingRequests.map((request) => (
-                    <div key={request.id} className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <Avatar>
-                          <AvatarImage src={request.avatar} alt={request.name} />
-                          <AvatarFallback>{request.name.charAt(0)}</AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <p className="font-medium">{request.name}</p>
-                          <p className="text-xs text-muted-foreground">Wants to connect with you</p>
-                        </div>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="outline" onClick={() => handleRejectRequest(request.id)}>
-                          <X className="h-4 w-4 mr-1" /> Decline
-                        </Button>
-                        <Button size="sm" onClick={() => handleAcceptRequest(request.id)}>
-                          <Check className="h-4 w-4 mr-1" /> Accept
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
+            )
+          })}
+        </div>
+      )}
+    </CardContent>
+  </Card>
+</TabsContent>
+        {/* Find People Tab */}
         <TabsContent value="find" className="mt-6">
           <Card>
             <CardHeader>
               <CardTitle>Find People</CardTitle>
-              <CardDescription>Search for new friends to connect with</CardDescription>
+              <CardDescription>Search for new connections</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <form onSubmit={handleSearch} className="flex gap-2">
@@ -199,21 +237,41 @@ export default function ContactsPage() {
                 </Button>
               </form>
 
-              <div className="space-y-4 mt-4">
+              <div className="space-y-4">
                 {searchResults.map((user) => (
                   <div key={user.id} className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <Avatar>
-                        <AvatarImage src={user.avatar} alt={user.name} />
-                        <AvatarFallback>{user.name.charAt(0)}</AvatarFallback>
+                        <AvatarImage src={user.profileImage} alt={user.username} />
+                        <AvatarFallback>{user.username[0]}</AvatarFallback>
                       </Avatar>
                       <div>
-                        <p className="font-medium">{user.name}</p>
+                        <p className="font-medium">{user.username}</p>
+                        {user.bio && <p className="text-sm text-muted-foreground">{user.bio}</p>}
                       </div>
                     </div>
-                    <Button size="sm" onClick={() => handleAddFriend(user.id)}>
-                      <UserPlus className="h-4 w-4 mr-1" /> Add Friend
-                    </Button>
+                    <div className="flex gap-2">
+                      {user.friendStatus === 'pending-received' && (
+                        <>
+                          <Button size="sm" variant="outline" onClick={() => handleRespondToRequest(user.id, false)}>
+                            <X className="mr-1 h-4 w-4" /> Decline
+                          </Button>
+                          <Button size="sm" onClick={() => handleRespondToRequest(user.id, true)}>
+                            <Check className="mr-1 h-4 w-4" /> Accept
+                          </Button>
+                        </>
+                      )}
+                      {user.friendStatus === 'pending-sent' && (
+                        <Button size="sm" variant="outline" disabled>
+                          <Clock className="mr-1 h-4 w-4" /> Request Sent
+                        </Button>
+                      )}
+                      {user.friendStatus === 'none' && (
+                        <Button size="sm" onClick={() => handleAddFriend(user.id)}>
+                          <UserPlus className="mr-1 h-4 w-4" /> Add
+                        </Button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -224,4 +282,3 @@ export default function ContactsPage() {
     </div>
   )
 }
-
