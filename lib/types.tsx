@@ -12,7 +12,7 @@ export interface Participant{
     temp?: boolean
     sender: Participant
     content: string
-    time: string
+    createdAt: string
     isMine: boolean
     read: boolean
   }

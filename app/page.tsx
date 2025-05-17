@@ -1,8 +1,19 @@
+"use client"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { ArrowRight, MessageSquare, Users, UserRound } from "lucide-react"
+import { disconnectSocket, getSocket } from '@/lib/socket'
+import { useEffect } from "react"
+
 
 export default function Home() {
+    useEffect(() => {
+    const socket = getSocket()
+    if (socket.connected) {
+      disconnectSocket()
+    }
+  }, [])
+
   return (
     <div className="flex flex-col min-h-screen">
       <header className="border-b">

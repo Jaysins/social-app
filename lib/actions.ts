@@ -177,3 +177,31 @@ export async function createGroupChat(groupData: { name: string; members: string
   return { success: true, groupId: 10 }
 }
 
+
+
+export async function getNotifications(data: {token: string, unread?: boolean;}) {
+  const { token, unread } = data;
+
+  const path = unread ?  "notifications/all?unread=true" : `notifications/all`
+
+  const result = await apiFetch(path, { method: 'GET' }, token);
+
+  if (result.error) {
+    return { success: false, error: result.error };
+  }
+
+  return { success: true, data: result.data };
+}
+
+
+export async function getStats(data: {token: string}) {
+  const { token } = data;
+
+  const result = await apiFetch('stats/dashboard', { method: 'GET' }, token);
+
+  if (result.error) {
+    return { success: false, error: result.error };
+  }
+
+  return { success: true, data: result.data };
+}

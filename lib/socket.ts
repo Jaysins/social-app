@@ -37,7 +37,7 @@ export function getSocket(): Socket {
     // Initialize socket connection to the standalone Socket.IO server
     // For local development, this will be localhost:3001
     // For production, you'll need to set up a separate Socket.IO server
-    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001"
+    const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3000"
 
     socket = io(socketUrl, {
       transports: ['websocket'],

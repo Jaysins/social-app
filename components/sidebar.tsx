@@ -1,9 +1,20 @@
-// components/Sidebar.tsx
+"use client"
 import { Home, User, Users, MessageSquare, Settings, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
+import { disconnectSocket } from "@/lib/socket";
+import { useRouter } from "next/navigation"
 
 export default function Sidebar() {
+  const router = useRouter()
+
+  const handleLogout = () => {
+    disconnectSocket()
+    localStorage.removeItem("token")
+    localStorage.removeItem("user")
+    router.push("/")
+  } 
+
   return (
     <aside className="hidden md:flex w-64 flex-col border-r bg-muted/40">
       <div className="p-6">
@@ -34,7 +45,7 @@ export default function Sidebar() {
             Messages
           </Button>
         </Link>
-        <Link href="/dashboard/settings">
+        <Link href="/dashboard/profile">
           <Button variant="ghost" className="w-full justify-start gap-2">
             <Settings size={18} />
             Settings
@@ -42,7 +53,7 @@ export default function Sidebar() {
         </Link>
       </nav>
       <div className="p-4 border-t">
-        <Button variant="ghost" className="w-full justify-start gap-2 text-muted-foreground">
+        <Button variant="ghost" className="w-full justify-start gap-2 text-muted-foreground"           onClick={handleLogout}>
           <LogOut size={18} />
           Logout
         </Button>
